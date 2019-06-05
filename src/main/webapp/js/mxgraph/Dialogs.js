@@ -365,7 +365,7 @@ var AboutDialog = function(editorUi)
 /**
  * Constructs a new filename dialog.
  */
-var FilenameDialog = function(editorUi, filename, buttonText, fn, label, validateFn, content, helpLink, closeOnBtn, cancelFn)
+var FilenameDialog = function(editorUi, filename, buttonText, fn, label, validateFn, content, helpLink, closeOnBtn, cancelFn, hints)
 {
 	closeOnBtn = (closeOnBtn != null) ? closeOnBtn : true;
 	var row, td;
@@ -485,6 +485,11 @@ var FilenameDialog = function(editorUi, filename, buttonText, fn, label, validat
 	if (label != null || content == null)
 	{
 		tbody.appendChild(row);
+		
+		if (hints != null)
+		{
+			td.appendChild(FilenameDialog.createTypeHint(editorUi, nameInput, hints));
+		}
 	}
 	
 	if (content != null)
@@ -551,6 +556,64 @@ var FilenameDialog = function(editorUi, filename, buttonText, fn, label, validat
 	table.appendChild(tbody);
 	
 	this.container = table;
+};
+
+/**
+ * 
+ */
+FilenameDialog.filenameHelpLink = null;
+
+/**
+ * 
+ */
+FilenameDialog.createTypeHint = function(ui, nameInput, hints)
+{
+	var hint = document.createElement('img');
+	hint.style.cssText = 'vertical-align:top;height:16px;width:16px;margin-left:4px;background-repeat:no-repeat;background-position:center bottom;cursor:pointer;';
+	mxUtils.setOpacity(hint, 70);
+	
+	var nameChanged = function()
+	{
+		hint.setAttribute('src', Editor.helpImage);
+		hint.setAttribute('title', mxResources.get('help'));
+		
+		for (var i = 0; i < hints.length; i++)
+		{
+			if (hints[i].ext.length > 0 &&
+				nameInput.value.substring(nameInput.value.length -
+						hints[i].ext.length - 1) == '.' + hints[i].ext)
+			{
+				hint.setAttribute('src',  mxClient.imageBasePath + '/warning.png');
+				hint.setAttribute('title', mxResources.get(hints[i].title));
+				break;
+			}
+		}
+	};
+	
+	mxEvent.addListener(nameInput, 'keyup', nameChanged);
+	mxEvent.addListener(nameInput, 'change', nameChanged);
+	mxEvent.addListener(hint, 'click', function(evt)
+	{
+		var title = hint.getAttribute('title');
+		
+		if (hint.getAttribute('src') == Editor.helpImage)
+		{
+			ui.editor.graph.openLink(FilenameDialog.filenameHelpLink);
+		}
+		else if (title != '')
+		{
+			ui.showError(null, title, mxResources.get('help'), function()
+			{
+				ui.editor.graph.openLink(FilenameDialog.filenameHelpLink);
+			}, null, mxResources.get('ok'), null, null, null, 340, 90);
+		}
+		
+		mxEvent.consume(evt);
+	});
+	
+	nameChanged();
+	
+	return hint;
 };
 
 /**
@@ -772,7 +835,7 @@ var EditDiagramDialog = function(editorUi)
 	var okBtn = mxUtils.button(mxResources.get('ok'), function()
 	{
 		// Removes all illegal control characters before parsing
-		var data = editorUi.editor.graph.zapGremlins(mxUtils.trim(textarea.value));
+		var data = Graph.zapGremlins(mxUtils.trim(textarea.value));
 		var error = null;
 		
 		if (select.value == 'new')
@@ -1420,22 +1483,22 @@ var EditDataDialog = function(ui, cell)
 	{
 	    if (a.name < b.name)
 	    {
-	    		return -1;
+	    	return -1;
 	    }
 	    else if (a.name > b.name)
 	    {
-	    		return 1;
+	    	return 1;
 	    }
 	    else
 	    {
-	    		return 0;
+	    	return 0;
 	    }
 	});
 
 	if (id != null)
 	{	
 		var text = document.createElement('input');
-		text.style.width = '280px';
+		text.style.width = '420px';
 		text.style.textAlign = 'center';
 		text.setAttribute('type', 'text');
 		text.setAttribute('readOnly', 'true');
@@ -1461,7 +1524,7 @@ var EditDataDialog = function(ui, cell)
 	var nameInput = document.createElement('input');
 	nameInput.setAttribute('placeholder', mxResources.get('enterPropertyName'));
 	nameInput.setAttribute('type', 'text');
-	nameInput.setAttribute('size', (mxClient.IS_IE || mxClient.IS_IE11) ? '18' : '22');
+	nameInput.setAttribute('size', (mxClient.IS_IE || mxClient.IS_IE11) ? '36' : '40');
 	nameInput.style.marginLeft = '2px';
 
 	newProp.appendChild(nameInput);
@@ -1866,6 +1929,7 @@ var OutlineWindow = function(editorUi, x, y, w, h)
 	
 	this.window.addListener(mxEvent.SHOW, mxUtils.bind(this, function()
 	{
+		this.window.fit();
 		outline.suspended = false;
 		outline.outline.refresh();
 		outline.update();
@@ -2094,13 +2158,52 @@ var LayersWindow = function(editorUi, x, y, w, h)
 	ldiv.appendChild(removeLink);
 
 	var insertLink = link.cloneNode();
+	insertLink.setAttribute('title', mxUtils.trim(mxResources.get('moveSelectionTo', [''])));
 	insertLink.innerHTML = '<div class="geSprite geSprite-insert" style="display:inline-block;"></div>';
 	
 	mxEvent.addListener(insertLink, 'click', function(evt)
 	{
 		if (graph.isEnabled() && !graph.isSelectionEmpty())
 		{
-			graph.moveCells(graph.getSelectionCells(), 0, 0, false, selectionLayer);
+			editorUi.editor.graph.popupMenuHandler.hideMenu();
+			
+			var menu = new mxPopupMenu(mxUtils.bind(this, function(menu, parent)
+			{
+				for (var i = layerCount - 1; i >= 0; i--)
+				{
+					(mxUtils.bind(this, function(child)
+					{
+						var item = menu.addItem(graph.convertValueToString(child) ||
+								mxResources.get('background'), null, mxUtils.bind(this, function()
+						{
+							graph.moveCells(graph.getSelectionCells(), 0, 0, false, child);
+						}), parent);
+						
+						if (graph.getSelectionCount() == 1 && graph.model.isAncestor(child, graph.getSelectionCell()))
+						{
+							menu.addCheckmark(item, Editor.checkmarkImage);
+						}
+						
+					}))(graph.model.getChildAt(graph.model.root, i));
+				}
+			}));
+			menu.div.className += ' geMenubarMenu';
+			menu.smartSeparators = true;
+			menu.showDisabled = true;
+			menu.autoExpand = true;
+			
+			// Disables autoexpand and destroys menu when hidden
+			menu.hideMenu = mxUtils.bind(this, function()
+			{
+				mxPopupMenu.prototype.hideMenu.apply(menu, arguments);
+				menu.destroy();
+			});
+	
+			var offset = mxUtils.getOffset(insertLink);
+			menu.popup(offset.x, offset.y + insertLink.offsetHeight, null, evt);
+			
+			// Allows hiding by clicking on document
+			editorUi.setCurrentMenu(menu);
 		}
 	});
 
@@ -2473,10 +2576,9 @@ var LayersWindow = function(editorUi, x, y, w, h)
 		
 		var label = graph.convertValueToString(selectionLayer) || mxResources.get('background');
 		removeLink.setAttribute('title', mxResources.get('removeIt', [label]));
-		insertLink.setAttribute('title', mxResources.get('moveSelectionTo', [label]));
 		duplicateLink.setAttribute('title', mxResources.get('duplicateIt', [label]));
 		dataLink.setAttribute('title', mxResources.get('editData'));
-		
+
 		if (graph.isSelectionEmpty())
 		{
 			insertLink.className = 'geButton mxDisabled';
@@ -2508,6 +2610,11 @@ var LayersWindow = function(editorUi, x, y, w, h)
 	this.window.setResizable(true);
 	this.window.setClosable(true);
 	this.window.setVisible(true);
+
+	this.window.addListener(mxEvent.SHOW, mxUtils.bind(this, function()
+	{
+		this.window.fit();
+	}));
 	
 	// Make refresh available via instance
 	this.refreshLayers = refresh;

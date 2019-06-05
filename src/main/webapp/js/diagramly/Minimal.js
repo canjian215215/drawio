@@ -348,7 +348,7 @@ EditorUi.initMinimalTheme = function()
         {
         	// Makes room for view zoom menu
         	this.tabContainer.style.right = '70px';
-        	this.diagramContainer.style.bottom = '30px';
+        	this.diagramContainer.style.bottom = this.tabContainerHeight + 'px';
         }
     	
     	editorUiUpdateTabContainer.apply(this, arguments);
@@ -657,19 +657,29 @@ EditorUi.initMinimalTheme = function()
         ui.actions.put('importFile', new Action('File...', function()
         {
             graph.popupMenuHandler.hideMenu();
-            var input = document.createElement('input');
-            input.setAttribute('type', 'file');
             
-            mxEvent.addListener(input, 'change', function()
-            {
-                if (input.files != null)
-                {
-                    // Using null for position will disable crop of input file
-                    ui.importFiles(input.files, null, null, ui.maxImageSize);
-                }
-            });
-
-            input.click();
+            if (ui.minImpFileInputElt == null) 
+			{
+	            var input = document.createElement('input');
+	            input.setAttribute('type', 'file');
+	            
+	            mxEvent.addListener(input, 'change', function()
+	            {
+	                if (input.files != null)
+	                {
+	                    // Using null for position will disable crop of input file
+	                    ui.importFiles(input.files, null, null, ui.maxImageSize);
+	                }
+	                
+	                input.value = '';
+	            });
+	            
+	            input.style.display = 'none';
+				document.body.appendChild(input);
+				ui.minImpFileInputElt = input;
+			}
+            
+            ui.minImpFileInputElt.click();
         }));
         ui.actions.put('importCsv', new Action(mxResources.get('csv') + '...', function()
         {
@@ -765,7 +775,14 @@ EditorUi.initMinimalTheme = function()
 			
 			ui.menus.addSubmenu('exportAs', menu, parent);
 
-			ui.menus.addMenuItems(menu, ['-', 'outline', 'layers', '-', 'find', 'tags'], parent);
+			ui.menus.addMenuItems(menu, ['-', 'outline', 'layers'], parent);
+			
+			if (ui.commentsSupported())
+			{
+				ui.menus.addMenuItems(menu, ['comments'], parent);
+			}
+			
+			ui.menus.addMenuItems(menu, ['-', 'find', 'tags'], parent);
 			
 			// Cannot use print in standalone mode on iOS as we cannot open new windows
 			if (!mxClient.IS_IOS || !navigator.standalone)
@@ -1242,10 +1259,11 @@ EditorUi.initMinimalTheme = function()
 			elt.style.fontSize = '12px';
 			elt.style.color = '#707070';
 			elt.style.width = '59px';
+			elt.style.cursor = 'pointer';
 			elt.style.borderTop = '1px solid lightgray';
 			elt.style.borderLeft = '1px solid lightgray';
-			elt.style.height = (parseInt(ui.tabContainer.style.height) - 1) + 'px';
-			elt.style.lineHeight = (parseInt(ui.tabContainer.style.height) + 1) + 'px';
+			elt.style.height = (parseInt(ui.tabContainerHeight) - 1) + 'px';
+			elt.style.lineHeight = (parseInt(ui.tabContainerHeight) + 1) + 'px';
 			wrapper.appendChild(elt);
 	        
 	    	// Updates the label if the scale changes
@@ -1268,7 +1286,8 @@ EditorUi.initMinimalTheme = function()
 	    		if (this.tabContainer != null)
 	    		{
 	    			elt.style.visibility = this.tabContainer.style.visibility;
-    	        	this.diagramContainer.style.bottom = (this.tabContainer.style.visibility != 'hidden') ? '30px' : '0px';
+    	        	this.diagramContainer.style.bottom = (this.tabContainer.style.visibility != 'hidden') ?
+    	        		this.tabContainerHeight + 'px' : '0px';
 	    		}
 	    	};
 		}
@@ -1379,9 +1398,9 @@ EditorUi.initMinimalTheme = function()
 		        	elt.style.height = '24px';
 		        	elt.style.width = '24px';
 					elt.style.zIndex = '1';
-					elt.style.top = '11px';
 					elt.style.right = '8px';
 					elt.style.cursor = 'pointer';
+					elt.style.top = (urlParams['embed'] == '1') ? '13px' : '11px';
 					menubar.appendChild(elt);
 					langMenuElt = elt;
 				}

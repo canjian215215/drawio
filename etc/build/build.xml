@@ -52,7 +52,7 @@
 		<replaceregexp file="${basedir}/.tmp1.xml" match="'" flags="g" replace="\\\\'" byline="true"/>
 		
 		<delete file="${basedir}/Graph-Stylesheet.js"/>
-		<echo file="${basedir}/Graph-Stylesheet.js">Graph.prototype.defaultThemes[Graph.prototype.defaultThemeName] = mxUtils.parseXml('</echo>
+		<echo file="${basedir}/Graph-Stylesheet.js">Graph.prototype.defaultThemes['default-style2'] = mxUtils.parseXml('</echo>
 		<concat destfile="${basedir}/Graph-Stylesheet.js" fixlastline="no" append="true">
 			<filelist dir="${basedir}" files=".tmp1.xml"/>
     		</concat>
@@ -101,6 +101,7 @@
 		<jscomp compilationLevel="simple" debug="false" forceRecompile="true" output="${basedir}/sidebar.min.js">
 			<sources dir="${war.dir}/js/diagramly/sidebar">
 				<file name="Sidebar.js" />
+				<file name="Sidebar-ActiveDirectory.js" />
 				<file name="Sidebar-Advanced.js" />
 				<file name="Sidebar-AlliedTelesis.js" />
 				<file name="Sidebar-Android.js" />
@@ -112,6 +113,7 @@
 				<file name="Sidebar-AWS3.js" />
 				<file name="Sidebar-AWS3D.js" />
 				<file name="Sidebar-AWS4.js" />
+				<file name="Sidebar-AWS4b.js" />
 				<file name="Sidebar-Azure.js" />
 				<file name="Sidebar-Basic.js" />
 				<file name="Sidebar-Bootstrap.js" />
@@ -119,6 +121,7 @@
 				<file name="Sidebar-Cabinet.js" />
 				<file name="Sidebar-CiscoSafe.js" />
 				<file name="Sidebar-Citrix.js" />
+				<file name="Sidebar-Cumulus.js" />
 				<file name="Sidebar-DFD.js" />
 				<file name="Sidebar-EIP.js" />
 				<file name="Sidebar-Electrical.js" />
@@ -142,6 +145,7 @@
 				<file name="Sidebar-Sitemap.js" />
 				<file name="Sidebar-Sysml.js" />
 				<file name="Sidebar-Veeam.js" />
+				<file name="Sidebar-VVD.js" />
 				<file name="Sidebar-WebIcons.js" />
 			</sources>
 		</jscomp>
@@ -191,6 +195,8 @@
 				<file name="Pages.js" />
 				<file name="Trees.js" />
 				<file name="Minimal.js" />
+				<file name="DrawioComment.js" />
+				<file name="DrawioUser.js" />
 			</sources>
 					
 			<sources dir="${basedir}">
@@ -254,6 +260,8 @@
 				<file name="LocalLibrary.js" />
 				<file name="StorageFile.js" />
 				<file name="StorageLibrary.js" />
+				<file name="RemoteFile.js" />
+				<file name="RemoteLibrary.js" />
 				<file name="UrlLibrary.js" />
 				<file name="Dialogs.js" />
 				<file name="Editor.js" />
@@ -312,6 +320,8 @@
 				<file name="LocalLibrary.js" />
 				<file name="StorageFile.js" />
 				<file name="StorageLibrary.js" />
+				<file name="RemoteFile.js" />
+				<file name="RemoteLibrary.js" />
 				<file name="UrlLibrary.js" />
 				<file name="Dialogs.js" />
 				<file name="Editor.js" />
@@ -348,6 +358,8 @@
 				<file name="TrelloFile.js" />
 				<file name="TrelloLibrary.js" />
 				<file name="TrelloClient.js" />
+				<file name="DrawioComment.js" />
+				<file name="DriveComment.js" />
 			</sources>
 			
 			<sources dir="${war.dir}/js/diagramly">
@@ -396,12 +408,8 @@
 	</target>
 
 	<target name="clean" description="Cleans build directories">
-		<delete failonerror="false">
-			<fileset dir="${javac.dir}">
-			</fileset>
-			<fileset dir="${build.dir}">
-			</fileset>
-		</delete>
+		<delete dir="${javac.dir}"/>
+		<delete dir="${build.dir}"/>
 		<delete file="${basedir}/base.min.js"/>
 		<delete file="${basedir}/base-viewer.min.js"/>
 	</target>

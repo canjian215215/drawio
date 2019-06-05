@@ -25,7 +25,7 @@ Format.prototype.showCloseButton = true;
 /**
  * Background color for inactive tabs.
  */
-Format.prototype.inactiveTabBackgroundColor = '#d7d7d7';
+Format.prototype.inactiveTabBackgroundColor = '#f1f3f4';
 
 /**
  * Background color for inactive tabs.
@@ -354,14 +354,16 @@ Format.prototype.refresh = function()
 	div.style.cursor = 'default';
 	
 	var label = document.createElement('div');
-	label.style.border = '1px solid #c0c0c0';
-	label.style.borderWidth = '0px 0px 1px 0px';
+	label.className = 'geFormatSection';
 	label.style.textAlign = 'center';
 	label.style.fontWeight = 'bold';
-	label.style.overflow = 'hidden';
-	label.style.display = (mxClient.IS_QUIRKS) ? 'inline' : 'inline-block';
 	label.style.paddingTop = '8px';
+	label.style.fontSize = '13px';
+	label.style.borderWidth = '0px 0px 1px 1px';
+	label.style.borderStyle = 'solid';
+	label.style.display = (mxClient.IS_QUIRKS) ? 'inline' : 'inline-block';
 	label.style.height = (mxClient.IS_QUIRKS) ? '34px' : '25px';
+	label.style.overflow = 'hidden';
 	label.style.width = '100%';
 	this.container.appendChild(div);
 	
@@ -375,6 +377,7 @@ Format.prototype.refresh = function()
 	if (graph.isSelectionEmpty())
 	{
 		mxUtils.write(label, mxResources.get('diagram'));
+		label.style.borderLeftWidth = '0px';
 		
 		// Adds button to hide the format panel since
 		// people don't seem to find the toolbar button
@@ -697,8 +700,8 @@ BaseFormatPanel.prototype.installInputHandler = function(input, key, defaultValu
 BaseFormatPanel.prototype.createPanel = function()
 {
 	var div = document.createElement('div');
+	div.className = 'geFormatSection';
 	div.style.padding = '12px 0px 12px 18px';
-	div.style.borderBottom = '1px solid #c0c0c0';
 	
 	return div;
 };
@@ -1489,6 +1492,20 @@ ArrangePanel.prototype.init = function()
 	}
 	
 	this.container.appendChild(this.addGroupOps(this.createPanel()));
+
+	if (ss.containsLabel)
+	{
+		// Adds functions from hidden style format panel
+		var span = document.createElement('div');
+		span.style.width = '100%';
+		span.style.marginTop = '0px';
+		span.style.fontWeight = 'bold';
+		span.style.padding = '10px 0 0 18px';
+		mxUtils.write(span, mxResources.get('style'));
+		this.container.appendChild(span);
+			
+		new StyleFormatPanel(this.format, this.editorUi, this.container);
+	}
 };
 
 /**
@@ -2979,7 +2996,65 @@ TextFormatPanel.prototype.addFont = function(container)
 		return currentFontColor;
 	}, function(color)
 	{
-		document.execCommand('forecolor', false, (color != mxConstants.NONE) ? color : 'transparent');
+		if (mxClient.IS_FF)
+		{
+			// Workaround for Firefox that adds the font element around
+			// anchor elements which ignore inherited colors is to move
+			// the font element inside anchor elements
+			var tmp = graph.cellEditor.textarea.getElementsByTagName('font');
+			var oldFonts = [];
+
+			for (var i = 0; i < tmp.length; i++)
+			{
+				oldFonts.push(
+				{
+					node: tmp[i],
+					color: tmp[i].getAttribute('color')
+				});
+			}
+
+			document.execCommand('forecolor', false, (color != mxConstants.NONE) ?
+				color : 'transparent');
+
+			// Finds the new or changed font element
+			var newFonts = graph.cellEditor.textarea.getElementsByTagName('font');
+
+			for (var i = 0; i < newFonts.length; i++)
+			{
+				if (i >= oldFonts.length || newFonts[i] != oldFonts[i].node ||
+					(newFonts[i] == oldFonts[i].node &&
+						newFonts[i].getAttribute('color') != oldFonts[i].color))
+				{
+					var child = newFonts[i].firstChild;
+
+					// Moves the font element to inside the anchor element and adopts all children
+					if (child != null && child.nodeName == 'A' && child.nextSibling ==
+						null &&
+						child.firstChild != null)
+					{
+						var parent = newFonts[i].parentNode;
+						parent.insertBefore(child, newFonts[i]);
+						var tmp = child.firstChild;
+
+						while (tmp != null)
+						{
+							var next = tmp.nextSibling;
+							newFonts[i].appendChild(tmp);
+							tmp = next;
+						}
+
+						child.appendChild(newFonts[i]);
+					}
+
+					break;
+				}
+			}
+		}
+		else
+		{
+			document.execCommand('forecolor', false, (color != mxConstants.NONE) ?
+				color : 'transparent');
+		}
 	}, '#000000',
 	{
 		install: function(apply) { fontColorApply = apply; },
@@ -3865,24 +3940,28 @@ StyleFormatPanel.prototype.init = function()
 	var graph = editor.graph;
 	var ss = this.format.getSelectionState();
 	
-	if (ss.containsImage && ss.vertices.length == 1 && ss.style.shape == 'image' &&
-		ss.style.image != null && ss.style.image.substring(0, 19) == 'data:image/svg+xml;')
+	if (!ss.containsLabel)
 	{
-		this.container.appendChild(this.addSvgStyles(this.createPanel()));
+		if (ss.containsImage && ss.vertices.length == 1 && ss.style.shape == 'image' &&
+			ss.style.image != null && ss.style.image.substring(0, 19) == 'data:image/svg+xml;')
+		{
+			this.container.appendChild(this.addSvgStyles(this.createPanel()));
+		}
+		
+		if (!ss.containsImage || ss.style.shape == 'image')
+		{
+			this.container.appendChild(this.addFill(this.createPanel()));
+		}
+	
+		this.container.appendChild(this.addStroke(this.createPanel()));
+		this.container.appendChild(this.addLineJumps(this.createPanel()));
+		var opacityPanel = this.createRelativeOption(mxResources.get('opacity'), mxConstants.STYLE_OPACITY, 41);
+		opacityPanel.style.paddingTop = '8px';
+		opacityPanel.style.paddingBottom = '8px';
+		this.container.appendChild(opacityPanel);
+		this.container.appendChild(this.addEffects(this.createPanel()));
 	}
 	
-	if (!ss.containsImage || ss.style.shape == 'image')
-	{
-		this.container.appendChild(this.addFill(this.createPanel()));
-	}
-
-	this.container.appendChild(this.addStroke(this.createPanel()));
-	this.container.appendChild(this.addLineJumps(this.createPanel()));
-	var opacityPanel = this.createRelativeOption(mxResources.get('opacity'), mxConstants.STYLE_OPACITY, 41);
-	opacityPanel.style.paddingTop = '8px';
-	opacityPanel.style.paddingBottom = '8px';
-	this.container.appendChild(opacityPanel);
-	this.container.appendChild(this.addEffects(this.createPanel()));
 	var opsPanel = this.addEditOps(this.createPanel());
 	
 	if (opsPanel.firstChild != null)

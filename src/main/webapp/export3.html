@@ -21,6 +21,9 @@
 	<link rel="stylesheet" href="mxgraph/css/common.css" charset="UTF-8" type="text/css">
     <script src="js/app.min.js"></script>
 	<script>
+		var mxIsElectron = navigator.userAgent.toLowerCase().indexOf(' electron/') > -1;
+		var GOOGLE_APPS_MAX_AREA = 25000000;
+		
 		Editor.initMath();
 	
 		function render(data)
@@ -38,9 +41,28 @@
 			data.w = parseFloat(data.w) || 0;
 			data.h = parseFloat(data.h) || 0;
 			data.scale = parseFloat(data.scale) || 1;
+			
+			var extras = null;
+			
+			try
+			{
+				extras = JSON.parse(data.extras);
+			} 
+			catch(e){}
 
+			//PNG+XML format
+			if (extras != null && extras.isPng)
+			{
+				var pngData = 'data:image/png;base64,' + data.xml;
+				//A hacky way to invoke extractGraphModelFromPng without EditorUi instance
+				data.xml = EditorUi.prototype.extractGraphModelFromPng.call({
+								editor: {graph: {bytesToString: Graph.prototype.bytesToString}}
+							}, pngData);
+			}
+			
 			// Parses XML
 			var xmlDoc = mxUtils.parseXml(data.xml);
+			
 			var diagrams = null;
 			var from = 0;
 			
@@ -115,6 +137,8 @@
 			var preview = null;
 			var waitCounter = 1;
 			var bounds;
+			var pageId;
+			var expScale;
 			// Waits for all images to finish loading
 			var cache = new Object();
 			var math = false;
@@ -128,7 +152,24 @@
 					doneDiv.id = 'LoadingComplete';
 					doneDiv.style.display = 'none';
 					doneDiv.setAttribute('bounds', JSON.stringify(bounds));
+					doneDiv.setAttribute('page-id', pageId);
+					doneDiv.setAttribute('scale', expScale);
 					document.body.appendChild(doneDiv);
+					
+					//Electron pdf export
+					if (mxIsElectron)
+					{
+						try 
+						{
+							const { ipcRenderer } = require('electron');
+							
+							ipcRenderer.send('render-finished', bounds);
+						}
+						catch(e)
+						{
+							console.log(e);
+						}
+					}
 				}
 			};
 			
@@ -208,7 +249,8 @@
 				
 				// Parses XML into graph
 				var codec = new mxCodec(xmlDoc);
-				codec.decode(xmlDoc.documentElement, graph.getModel());
+				var model = graph.getModel();
+				codec.decode(xmlDoc.documentElement, model);
 	
 				// Loads background color
 				var bg = (data.bg != null && data.bg.length > 0) ? data.bg : xmlDoc.documentElement.getAttribute('background');
@@ -230,12 +272,34 @@
 				{
 					document.body.style.backgroundColor = bg;
 				}
-	
+
+				//handle layers
+				if (extras != null && extras.layers != null)
+				{
+					var childCount = model.getChildCount(model.root);
+					
+					// Hides all layers
+					for (var i = 0; i < childCount; i++)
+					{
+						model.setVisible(model.getChildAt(model.root, i), false);
+					}
+					
+					for (var i = 0; i < extras.layers.length; i++)
+					{
+						var layer = model.getChildAt(model.root, extras.layers[i]);
+						
+						if (layer != null)
+						{
+							model.setVisible(layer, true);
+						}
+					}
+				}
+				
 				// Sets initial value for PDF page background
 				graph.pdfPageVisible = false;
 				
 				// Handles PDF output where the output should match the page format if the page is visible
-				if (data.format == 'pdf' && xmlDoc.documentElement.getAttribute('page') == '1' && data.w == 0 && data.h == 0)
+				if (data.format == 'pdf' && xmlDoc.documentElement.getAttribute('page') == '1' && data.w == 0 && data.h == 0 && data.scale == 1)
 				{
 					var pw = xmlDoc.documentElement.getAttribute('pageWidth');
 					var ph = xmlDoc.documentElement.getAttribute('pageHeight');
@@ -303,9 +367,23 @@
 					var b = graph.getGraphBounds();
 					
 					// Floor is needed to keep rendering crisp
-					if (data.w > 0 && data.h > 0)
+					if (data.w > 0 || data.h > 0)
 					{
-						var s = Math.min(data.w / b.width, data.h / b.height);
+						var s = 1;
+						
+						if (data.w > 0 && data.h > 0)
+						{
+							s = Math.min(data.w / b.width, data.h / b.height);
+						}
+						else if (data.w > 0)
+						{
+							s = data.w / b.width;
+						}
+						else
+						{
+							s = data.h / b.height;
+						}
+						
 						graph.view.scaleAndTranslate(s,
 							Math.floor(data.border / s - Math.floor(b.x)),
 							Math.floor(data.border / s - Math.floor(b.y)));
@@ -316,17 +394,26 @@
 						
 						if (autoScale)
 						{
-							if (b.width < 800 & b.height < 1200)
+							var pageWidth = (extras != null && extras.pageWidth != null) ? extras.pageWidth : 800;
+							
+							if (b.width < pageWidth & b.height < 1.5 * pageWidth)
 							{
 								s = 4;
 							}
-							else if (b.width < 1600 & b.height < 2400)
+							else if (b.width < 2 * pageWidth & b.height < 3 * pageWidth)
 							{
 								s = 3;
 							}
-							else if (b.width < 3200 && b.height < 4800)
+							else if (b.width < 4 * pageWidth && b.height < 6 * pageWidth)
 							{
 								s = 2;
+							}
+							
+							//The image cannot exceed 25 MP to be included in Google Apps
+							if (b.width * s * b.height * s > GOOGLE_APPS_MAX_AREA)
+							{
+								//Subtracting 0.01 to prevent any other rounding that can make slightly over 25 MP 
+								s = Math.sqrt(GOOGLE_APPS_MAX_AREA / (b.width * b.height)) - 0.01;
 							}
 						}
 						
@@ -354,8 +441,9 @@
 				
 				// Gets the diagram bounds and sets the document size
 				bounds = (graph.pdfPageVisible) ? graph.view.getBackgroundPageBounds() : graph.getGraphBounds();
-				bounds.width = Math.ceil(bounds.width + data.border);
+				bounds.width = Math.ceil(bounds.width + data.border) + 1; //The 1 extra pixels to prevent cutting the cells on the edges when crop is enabled
 				bounds.height = Math.ceil(bounds.height + data.border);
+				expScale = graph.view.scale || 1;
 				
 				// Converts the graph to a vertical sequence of pages for PDF export
 				if (graph.pdfPageVisible)
@@ -372,7 +460,7 @@
 			
 					// Applies print scale
 					pf = mxRectangle.fromRectangle(pf);
-					pf.width = Math.ceil(pf.width);
+					pf.width = Math.ceil(pf.width) + 1; //The 1 extra pixels to prevent cutting the cells on the right edge of the page
 					pf.height = Math.ceil(pf.height);
 					
 					// Starts at first visible page
@@ -466,7 +554,12 @@
 				{
 					if (diagrams[i] != null)
 					{
-						xmlDoc = mxUtils.parseXml(graph.decompress(mxUtils.getTextContent(diagrams[i])));
+						if (pageId == null)
+						{
+							pageId = diagrams[i].getAttribute('id')
+						}
+						
+						xmlDoc = mxUtils.parseXml(Graph.decompress(mxUtils.getTextContent(diagrams[i])));
 						graph.getModel().clear();
 						from = i;
 						renderPage();
@@ -485,6 +578,69 @@
 			// Immediate return if not waiting for any content
 			decrementWaitCounter();
 		};
+		
+		//Code taken from https://github.com/languitar/drawio-batch
+		//Must be called after rendering is finished
+		function getSvgData()
+		{
+			// extracts the inline SVG element used for rendering the diagram and puts it into a file with appropriate SVG headers
+
+		    // get the rendered page content as valid SVG
+	        const xmlns = 'http://www.w3.org/2000/xmlns/'
+	        const xlinkns = 'http://www.w3.org/1999/xlink'
+	        const svgns = 'http://www.w3.org/2000/svg'
+
+	        svg = document.getElementsByTagName('svg')[0]
+	        svg.setAttribute('version', '1.1')
+
+	        var defsEl = document.createElement('defs')
+	        svg.insertBefore(defsEl, svg.firstChild)
+
+	        var styleEl = document.createElement('style')
+	        defsEl.appendChild(styleEl)
+	        styleEl.setAttribute('type', 'text/css')
+
+	        // removing attributes so they aren't doubled up
+	        svg.removeAttribute('xmlns')
+	        svg.removeAttribute('xlink')
+
+	        // These are needed for the svg
+	        if (!svg.hasAttributeNS(xmlns, 'xmlns')) {
+	          svg.setAttributeNS(xmlns, 'xmlns', svgns)
+	        }
+
+	        if (!svg.hasAttributeNS(xmlns, 'xmlns:xlink')) {
+	          svg.setAttributeNS(xmlns, 'xmlns:xlink', xlinkns)
+	        }
+
+	        //This page(code) is designed for Chrome (Puppeteer or Electron) which supports this 
+	        var source = (new XMLSerializer()).serializeToString(svg);
+	        
+	        return '<?xml version="1.0" standalone="no"?>\r\n' + source;
+		}
+		
+		//Electron pdf export
+		if (mxIsElectron)
+		{
+			try 
+			{
+				const { ipcRenderer } = require('electron');
+				
+				ipcRenderer.on('render', (event, arg) => 
+				{
+					render(arg);
+				});
+				
+				ipcRenderer.on('get-svg-data', (event, arg) => 
+				{
+					ipcRenderer.send('svg-data', getSvgData());
+				});
+			}
+			catch(e)
+			{
+				console.log(e);
+			}
+		}
 	</script>
 </head>
 <body style="margin:0px;">

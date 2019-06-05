@@ -120,14 +120,17 @@
 				
 				if (xml != null)
 				{
-					graph.setSelectionCells(editorUi.importXml(xml, 20, 20, true));
+					var insertPoint = editorUi.editor.graph.getFreeInsertPoint();
+					graph.setSelectionCells(editorUi.importXml(xml,
+						Math.max(insertPoint.x, 20),
+						Math.max(insertPoint.y, 20), true));
 					graph.scrollCellToVisible(graph.getSelectionCell());
 				}
 			}, null, null, null, null, null, null, null, null, null, null,
 				false, mxResources.get('insert'));
 
 			editorUi.showDialog(dlg.container, 620, 440, true, true);
-		}));
+		})).isEnabled = isGraphEnabled;
 		
 		editorUi.actions.put('exportXml', new Action(mxResources.get('formatXml') + '...', function()
 		{
@@ -318,18 +321,16 @@
 		
 		editorUi.actions.addAction('revisionHistory...', function()
 		{
-			var file = editorUi.getCurrentFile();
-			
-			if (file == null || !file.isRevisionHistorySupported())
+			if (!editorUi.isRevisionHistorySupported())
 			{
 				editorUi.showError(mxResources.get('error'), mxResources.get('notAvailable'), mxResources.get('ok'));
 			}
 			else if (editorUi.spinner.spin(document.body, mxResources.get('loading')))
 			{
-				file.getRevisions(mxUtils.bind(this, function(revs)
+				editorUi.getRevisions(mxUtils.bind(this, function(revs, restoreFn)
 				{
 					editorUi.spinner.stop();
-					var dlg = new RevisionDialog(editorUi, revs);
+					var dlg = new RevisionDialog(editorUi, revs, restoreFn);
 					editorUi.showDialog(dlg.container, 640, 480, true, true);
 					dlg.init();
 				}), mxUtils.bind(this, function(err)
@@ -522,7 +523,6 @@
 		{
 			if (editorUi.isExportToCanvas())
 			{
-				// TODO: Enable include option if CRC is fixed
 				editorUi.showExportDialog(mxResources.get('image'), false, mxResources.get('export'),
 					'https://support.draw.io/display/DO/Exporting+Files',
 					mxUtils.bind(this, function(scale, transparentBackground, ignoreSelection,
@@ -535,7 +535,7 @@
 						   	editorUi.exportImage(val / 100, transparentBackground, ignoreSelection,
 						   		addShadow, editable, border, !cropImage, currentPage);
 						}
-					}), true, false, 'png');
+					}), true, true, 'png');
 			}
 			else if (!editorUi.isOffline() && (!mxClient.IS_IOS || !navigator.standalone))
 			{
@@ -741,64 +741,123 @@
 			})));
 
 			// Extends the menubar with the language menu
-			if (uiTheme != 'atlas')
+			var menusCreateMenuBar = Menus.prototype.createMenubar;
+			Menus.prototype.createMenubar = function(container)
 			{
-				var menusCreateMenuBar = Menus.prototype.createMenubar;
-				Menus.prototype.createMenubar = function(container)
+				var menubar = menusCreateMenuBar.apply(this, arguments);
+				
+				if (menubar != null)
 				{
-					var menubar = menusCreateMenuBar.apply(this, arguments);
+					var langMenu = this.get('language');
 					
-					if (menubar != null)
+					if (langMenu != null)
 					{
-						var langMenu = this.get('language');
+						var elt = menubar.addMenu('', langMenu.funct);
+						elt.setAttribute('title', mxResources.get('language'));
+						elt.style.width = '16px';
+						elt.style.paddingTop = '2px';
+						elt.style.paddingLeft = '4px';
+						elt.style.zIndex = '1';
+						elt.style.position = 'absolute';
+						elt.style.display = 'block';
+						elt.style.cursor = 'pointer';
+						elt.style.right = '17px';
 						
-						if (langMenu != null)
+						if (uiTheme == 'atlas')
 						{
-							var elt = menubar.addMenu('', langMenu.funct);
-							elt.setAttribute('title', mxResources.get('language'));
-							elt.style.width = '16px';
-							elt.style.paddingTop = '2px';
-							elt.style.paddingLeft = '4px';
-							elt.style.zIndex = '1';
-							elt.style.position = 'absolute';
-							elt.style.top = '2px';
-							elt.style.right = '17px';
-							elt.style.display = 'block';
-							elt.style.cursor = 'pointer';
-							
-							if (!mxClient.IS_VML)
-							{
-								var icon = document.createElement('div');
-								icon.style.backgroundImage = 'url(' + Editor.globeImage + ')';
-								icon.style.backgroundPosition = 'center center';
-								icon.style.backgroundRepeat = 'no-repeat';
-								icon.style.backgroundSize = '19px 19px';
-								icon.style.position = 'absolute';
-								icon.style.height = '19px';
-								icon.style.width = '19px';
-								icon.style.marginTop = '2px';
-								icon.style.zIndex = '1';
-								elt.appendChild(icon);
-								mxUtils.setOpacity(elt, 40);
-								
-								if (uiTheme == 'dark')
-								{
-									elt.style.filter = 'invert(100%)';
-								}
-							}
-							else
-							{
-								elt.innerHTML = '<div class="geIcon geSprite geSprite-globe"/>';
-							}
-							
-							document.body.appendChild(elt);
+							elt.style.top = '6px';
+							elt.style.right = '15px';
 						}
+						else if (uiTheme == 'min')
+						{
+							elt.style.top = '2px';
+						}
+						else
+						{
+							elt.style.top = '0px';
+						}
+						
+						if (!mxClient.IS_VML)
+						{
+							var icon = document.createElement('div');
+							icon.style.backgroundImage = 'url(' + Editor.globeImage + ')';
+							icon.style.backgroundPosition = 'center center';
+							icon.style.backgroundRepeat = 'no-repeat';
+							icon.style.backgroundSize = '19px 19px';
+							icon.style.position = 'absolute';
+							icon.style.height = '19px';
+							icon.style.width = '19px';
+							icon.style.marginTop = '2px';
+							icon.style.zIndex = '1';
+							elt.appendChild(icon);
+							mxUtils.setOpacity(elt, 40);
+							
+							if (uiTheme == 'atlas' || uiTheme == 'dark')
+							{
+								elt.style.opacity = '0.85';
+								elt.style.filter = 'invert(100%)';
+							}
+						}
+						else
+						{
+							elt.innerHTML = '<div class="geIcon geSprite geSprite-globe"/>';
+						}
+						
+						document.body.appendChild(elt);
 					}
-	
-					return menubar;
-				};
-			}
+				}
+
+				return menubar;
+			};
 		}
+		
+		editorUi.customLayoutConfig = [{'layout': 'mxHierarchicalLayout',
+			'config':
+			{'orientation': 'west',
+			'intraCellSpacing': 30,
+			'interRankCellSpacing': 100,
+			'interHierarchySpacing': 60,
+			'parallelEdgeSpacing': 10}}];
+		
+		// Adds action
+		editorUi.actions.addAction('runLayout', function()
+		{
+	    	var dlg = new TextareaDialog(editorUi, 'Run Layouts:',
+	    		JSON.stringify(editorUi.customLayoutConfig, null, 2),
+	    		function(newValue)
+			{
+				if (newValue.length > 0)
+				{
+					try
+					{
+						var layoutList = JSON.parse(newValue);
+						editorUi.executeLayoutList(layoutList)
+						editorUi.customLayoutConfig = layoutList;
+					}
+					catch (e)
+					{
+						editorUi.handleError(e);
+						console.error(e);
+					}
+				}
+			});
+	    	
+	    	dlg.textarea.style.width = '600px';
+	    	dlg.textarea.style.height = '380px';
+			editorUi.showDialog(dlg.container, 620, 460, true, true);
+			dlg.init();
+		});
+		
+		var layoutMenu = this.get('layout');
+		var layoutMenuFunct = layoutMenu.funct;
+		
+		layoutMenu.funct = function(menu, parent)
+		{
+			layoutMenuFunct.apply(this, arguments);
+			
+			menu.addSeparator(parent);
+			editorUi.menus.addMenuItem(menu, 'runLayout', parent, null, null, mxResources.get('apply') + '...');
+		};
 		
 		this.put('help', new Menu(mxUtils.bind(this, function(menu, parent)
 		{
@@ -827,7 +886,7 @@
 						this.editorUi.openLink('https://desk.draw.io/support/search/solutions?term=' +
 							encodeURIComponent(term));
 						input.value = '';
-						EditorUi.logEvent({category: 'Help', action: 'search', label: term});
+						EditorUi.logEvent({category: 'SEARCH-HELP', action: 'search', label: term});
 						
 						if (this.editorUi.menubar != null)
 						{
@@ -875,8 +934,7 @@
 
 				this.addMenuItems(menu, ['support', '-'], parent);
 				
-				if (!editorUi.isOffline() && !EditorUi.isElectronApp &&
-					!navigator.standalone && urlParams['embed'] != '1')
+				if (!EditorUi.isElectronApp && !navigator.standalone && urlParams['embed'] != '1')
 				{
 					this.addMenuItems(menu, ['downloadDesktop'], parent);
 				}
@@ -950,7 +1008,7 @@
 				if (!graph.isSelectionEmpty())
 				{
 					editorUi.showTextDialog('Create Sidebar Entry', 'sb.createVertexTemplateFromData(\'' +
-						graph.compress(mxUtils.getXml(graph.encodeCells(graph.getSelectionCells()))) +
+						Graph.compress(mxUtils.getXml(graph.encodeCells(graph.getSelectionCells()))) +
 						'\', width, height, \'Title\');');
 				}
 			}));
@@ -979,7 +1037,7 @@
 						{
 							if (newValue.charAt(0) != '<')
 							{
-								newValue = graph.decompress(newValue);
+								newValue = Graph.decompress(newValue);
 								mxLog.debug('See console for uncompressed XML');
 								console.log('xml', newValue);
 							}
@@ -1438,7 +1496,9 @@
 		
 		editorUi.actions.put('liveImage', new Action('Live image...', function()
 		{
-			if (editorUi.spinner.spin(document.body, mxResources.get('loading')))
+			var current = editorUi.getCurrentFile();
+			
+			if (current != null && editorUi.spinner.spin(document.body, mxResources.get('loading')))
 			{
 				editorUi.getPublicUrl(editorUi.getCurrentFile(), function(url)
 				{
@@ -1446,8 +1506,8 @@
 					
 					if (url != null)
 					{
-						var encUrl = encodeURIComponent(url);
-						var dlg = new EmbedDialog(editorUi, EXPORT_URL + '?format=png&url=' + encUrl, 0);
+						var dlg = new EmbedDialog(editorUi, '<img src="' + ((current.constructor != DriveFile) ?
+							url : 'https://drive.google.com/uc?id=' + current.getId()) + '"/>');
 						editorUi.showDialog(dlg.container, 440, 240, true, true);
 						dlg.init();
 					}
@@ -1809,7 +1869,7 @@
 						// as slightly different semantic, but works the same way.
 						service.getFile(id, function(file)
 						{
-							var mime = getMimeType(file.getTitle());
+							var mime = (file.getData().substring(0, 11) == 'data:image/') ? getMimeType(file.getTitle()) : 'text/xml';
 							
 							// Imports SVG as images
 							if (/\.svg$/i.test(file.getTitle()) && !editorUi.editor.isDataSvg(file.getData()))
@@ -1838,7 +1898,7 @@
 						pickFileFromService(editorUi.drive);
 					}, parent);
 				}
-				else if (googleEnabled)
+				else if (googleEnabled && typeof window.DriveClient === 'function')
 				{
 					menu.addItem(mxResources.get('googleDrive') + ' (' + mxResources.get('loading') + '...)', null, function()
 					{
@@ -1854,7 +1914,7 @@
 					pickFileFromService(editorUi.oneDrive);
 				}, parent);
 			}
-			else if (oneDriveEnabled)
+			else if (oneDriveEnabled && typeof window.OneDriveClient === 'function')
 			{
 				menu.addItem(mxResources.get('oneDrive') + ' (' + mxResources.get('loading') + '...)', null, function()
 				{
@@ -1869,7 +1929,7 @@
 					pickFileFromService(editorUi.dropbox);
 				}, parent);
 			}
-			else if (dropboxEnabled)
+			else if (dropboxEnabled && typeof window.DropboxClient === 'function')
 			{
 				menu.addItem(mxResources.get('dropbox') + ' (' + mxResources.get('loading') + '...)', null, function()
 				{
@@ -1892,7 +1952,7 @@
 					pickFileFromService(editorUi.trello);
 				}, parent);
 			}
-			else if (trelloEnabled)
+			else if (trelloEnabled && typeof window.TrelloClient === 'function')
 			{
 				menu.addItem(mxResources.get('trello') + ' (' + mxResources.get('loading') + '...)', null, function()
 				{
@@ -2023,7 +2083,8 @@
 				
 				var dlg = new FilenameDialog(this.editorUi, filename, mxResources.get('rename'), mxUtils.bind(this, function(title)
 				{
-					if (title != null && title.length > 0 && file != null && this.editorUi.spinner.spin(document.body, mxResources.get('renaming')))
+					if (title != null && title.length > 0 && file != null && title != file.getTitle() &&
+						this.editorUi.spinner.spin(document.body, mxResources.get('renaming')))
 					{
 						// Delete old file, save new file in dropbox if autosize is enabled
 						file.rename(title, mxUtils.bind(this, function(resp)
@@ -2046,8 +2107,8 @@
 					editorUi.showError(mxResources.get('error'), mxResources.get('invalidName'), mxResources.get('ok'));
 					
 					return false;
-				});
-				this.editorUi.showDialog(dlg.container, 300, 80, true, true);
+				}, null, null, null, null, editorUi.editor.fileExtensions);
+				this.editorUi.showDialog(dlg.container, 340, 90, true, true);
 				dlg.init();
 			}
 		}));
@@ -2114,7 +2175,8 @@
 					{
 						editorUi.hideDialog();
 					}), mxResources.get('makeCopy'), mxResources.get('create'), null,
-						null, null, null, true);
+						null, null, null, true, null, null, null, null,
+						editorUi.editor.fileExtensions);
 					editorUi.showDialog(dlg.container, 420, 380, true, true);
 					dlg.init();
 				}
@@ -2132,6 +2194,20 @@
 			
 			if (file.getMode() == App.MODE_GOOGLE || file.getMode() == App.MODE_ONEDRIVE)
 			{
+				var isInRoot = false;
+				
+				if (file.getMode() == App.MODE_GOOGLE && file.desc.parents != null)
+				{
+					for (var i = 0; i < file.desc.parents.length; i++)
+					{
+						if (file.desc.parents[i].isRoot)
+						{
+							isInRoot = true;
+							break;
+						}
+					}
+				}
+				
 				editorUi.pickFolder(file.getMode(), mxUtils.bind(this, function(folderId)
 				{
 	            	if (editorUi.spinner.spin(document.body, mxResources.get('moving')))
@@ -2144,7 +2220,7 @@
 	        				editorUi.handleError(resp);
 	        			}));
 	            	}
-				}), null, true);
+				}), null, true, isInRoot);
 			}
 		}));
 		
@@ -2165,17 +2241,27 @@
 
 		this.editorUi.actions.addAction('share...', mxUtils.bind(this, function()
 		{
-			var file = this.editorUi.getCurrentFile();
-			
-			if (file != null)
+			try
 			{
-				this.editorUi.drive.showPermissions(file.getId());
+				var file = editorUi.getCurrentFile();
+				
+				if (file != null)
+				{
+					editorUi.drive.showPermissions(file.getId());
+				}
+			}
+			catch (e)
+			{
+				editorUi.handleError(e);
 			}
 		}));
 
 		this.put('embed', new Menu(mxUtils.bind(this, function(menu, parent)
 		{
-			if (urlParams['test'] == '1')
+			var file = editorUi.getCurrentFile();
+			
+			if (file != null && (file.getMode() == App.MODE_GOOGLE ||
+				file.getMode() == App.MODE_GITHUB) && /(\.png)$/i.test(file.getTitle()))
 			{
 				this.addMenuItems(menu, ['liveImage', '-'], parent);
 			}
@@ -2213,7 +2299,7 @@
 						// Executed after dialog is added to dom
 						dlg.init();
 					}
-				}), parent);
+				}), parent, null, isGraphEnabled());
 			}
 		};
 		
@@ -2246,23 +2332,22 @@
 	    	return cell;
 		};
 		
-		
 		editorUi.actions.put('exportSvg', new Action(mxResources.get('formatSvg') + '...', function()
+		{
+			editorUi.showExportDialog(mxResources.get('formatSvg'), true, mxResources.get('export'),
+				'https://support.draw.io/display/DO/Exporting+Files',
+				mxUtils.bind(this, function(scale, transparentBackground, ignoreSelection, addShadow,
+					editable, embedImages, border, cropImage, currentPage, linkTarget)
 				{
-					editorUi.showExportDialog(mxResources.get('formatSvg'), true, mxResources.get('export'),
-						'https://support.draw.io/display/DO/Exporting+Files',
-						mxUtils.bind(this, function(scale, transparentBackground, ignoreSelection, addShadow,
-							editable, embedImages, border, cropImage, currentPage, linkTarget)
-						{
-							var val = parseInt(scale);
-							
-							if (!isNaN(val) && val > 0)
-							{
-							   	editorUi.exportSvg(val / 100, transparentBackground, ignoreSelection, addShadow,
-							   		editable, embedImages, border, !cropImage, currentPage, linkTarget);
-							}
-						}), true, null, 'svg');
-				}));
+					var val = parseInt(scale);
+					
+					if (!isNaN(val) && val > 0)
+					{
+					   	editorUi.exportSvg(val / 100, transparentBackground, ignoreSelection, addShadow,
+					   		editable, embedImages, border, !cropImage, currentPage, linkTarget);
+					}
+				}), true, null, 'svg');
+		}));
 		
 		editorUi.actions.put('insertText', new Action(mxResources.get('text'), function()
 		{
@@ -2328,7 +2413,7 @@
 			menu.addItem(mxResources.get('csv') + '...', null, function()
 			{
 				editorUi.showImportCsvDialog();
-			}, parent);
+			}, parent, null, isGraphEnabled());
 		})));
 
 		this.put('insertLayout', new Menu(mxUtils.bind(this, function(menu, parent)
@@ -2384,7 +2469,7 @@
 					editorUi.pickFile(App.MODE_GOOGLE);
 				}, parent);
 			}
-			else if (googleEnabled)
+			else if (googleEnabled && typeof window.DriveClient === 'function')
 			{
 				menu.addItem(mxResources.get('googleDrive') + ' (' + mxResources.get('loading') + '...)', null, function()
 				{
@@ -2399,7 +2484,7 @@
 					editorUi.pickFile(App.MODE_ONEDRIVE);
 				}, parent);
 			}
-			else if (oneDriveEnabled)
+			else if (oneDriveEnabled && typeof window.OneDriveClient === 'function')
 			{
 				menu.addItem(mxResources.get('oneDrive') + ' (' + mxResources.get('loading') + '...)', null, function()
 				{
@@ -2414,7 +2499,7 @@
 					editorUi.pickFile(App.MODE_DROPBOX);
 				}, parent);
 			}
-			else if (dropboxEnabled)
+			else if (dropboxEnabled && typeof window.DropboxClient === 'function')
 			{
 				menu.addItem(mxResources.get('dropbox') + ' (' + mxResources.get('loading') + '...)', null, function()
 				{
@@ -2437,7 +2522,7 @@
 					editorUi.pickFile(App.MODE_TRELLO);
 				}, parent);
 			}
-			else if (trelloEnabled)
+			else if (trelloEnabled && typeof window.TrelloClient === 'function')
 			{
 				menu.addItem(mxResources.get('trello') + ' (' + mxResources.get('loading') + '...)', null, function()
 				{
@@ -2504,7 +2589,7 @@
 							editorUi.showLibraryDialog(null, null, null, null, App.MODE_GOOGLE);
 						}, parent);
 					}
-					else if (googleEnabled)
+					else if (googleEnabled && typeof window.DriveClient === 'function')
 					{
 						menu.addItem(mxResources.get('googleDrive') + ' (' + mxResources.get('loading') + '...)', null, function()
 						{
@@ -2520,7 +2605,7 @@
 						editorUi.showLibraryDialog(null, null, null, null, App.MODE_ONEDRIVE);
 					}, parent);
 				}
-				else if (oneDriveEnabled)
+				else if (oneDriveEnabled && typeof window.OneDriveClient === 'function')
 				{
 					menu.addItem(mxResources.get('oneDrive') + ' (' + mxResources.get('loading') + '...)', null, function()
 					{
@@ -2535,7 +2620,7 @@
 						editorUi.showLibraryDialog(null, null, null, null, App.MODE_DROPBOX);
 					}, parent);
 				}
-				else if (dropboxEnabled)
+				else if (dropboxEnabled && typeof window.DropboxClient === 'function')
 				{
 					menu.addItem(mxResources.get('dropbox') + ' (' + mxResources.get('loading') + '...)', null, function()
 					{
@@ -2558,7 +2643,7 @@
 						editorUi.showLibraryDialog(null, null, null, null, App.MODE_TRELLO);
 					}, parent);
 				}
-				else if (trelloEnabled)
+				else if (trelloEnabled && typeof window.TrelloClient === 'function')
 				{
 					menu.addItem(mxResources.get('trello') + ' (' + mxResources.get('loading') + '...)', null, function()
 					{
@@ -2596,7 +2681,7 @@
 							editorUi.pickLibrary(App.MODE_GOOGLE);
 						}, parent);
 					}
-					else if (googleEnabled)
+					else if (googleEnabled && typeof window.DriveClient === 'function')
 					{
 						menu.addItem(mxResources.get('googleDrive') + ' (' + mxResources.get('loading') + '...)', null, function()
 						{
@@ -2612,7 +2697,7 @@
 						editorUi.pickLibrary(App.MODE_ONEDRIVE);
 					}, parent);
 				}
-				else if (oneDriveEnabled)
+				else if (oneDriveEnabled && typeof window.OneDriveClient === 'function')
 				{
 					menu.addItem(mxResources.get('oneDrive') + ' (' + mxResources.get('loading') + '...)', null, function()
 					{
@@ -2627,7 +2712,7 @@
 						editorUi.pickLibrary(App.MODE_DROPBOX);
 					}, parent);
 				}
-				else if (dropboxEnabled)
+				else if (dropboxEnabled && typeof window.DropboxClient === 'function')
 				{
 					menu.addItem(mxResources.get('dropbox') + ' (' + mxResources.get('loading') + '...)', null, function()
 					{
@@ -2650,7 +2735,7 @@
 						editorUi.pickLibrary(App.MODE_TRELLO);
 					}, parent);
 				}
-				else if (trelloEnabled)
+				else if (trelloEnabled && typeof window.TrelloClient === 'function')
 				{
 					menu.addItem(mxResources.get('trello') + ' (' + mxResources.get('loading') + '...)', null, function()
 					{
@@ -2688,7 +2773,7 @@
 							{
 								var realUrl = fileUrl;
 								
-								if (!editorUi.isCorsEnabledForUrl(fileUrl))
+								if (!editorUi.editor.isCorsEnabledForUrl(fileUrl))
 								{
 									realUrl = PROXY_URL + '?url=' + encodeURIComponent(fileUrl);
 								}
@@ -2725,6 +2810,16 @@
 						dlg.init();
 					}, parent);
 				}
+				
+				if (urlParams['confLib'] == '1')
+				{
+					menu.addSeparator(parent);
+					
+					menu.addItem(mxResources.get('confluenceCloud') + '...', null, function()
+					{
+						editorUi.showRemotelyStoredLibrary(mxResources.get('libraries'));
+					}, parent);
+				}
 			}));
 		}
 			
@@ -2732,24 +2827,76 @@
 		this.put('edit', new Menu(mxUtils.bind(this, function(menu, parent)
 		{
 			this.addMenuItems(menu, ['undo', 'redo', '-', 'cut', 'copy', 'paste', 'delete', '-', 'duplicate', '-',
-									 'find', '-',
-			                         'editData', 'editTooltip', '-', 'editStyle', 'editGeometry', '-',
+									 'find', '-', 'editData', 'editTooltip', '-', 'editStyle', 'editGeometry', '-',
 			                         'edit', '-', 'editLink', 'openLink', '-',
 			                         'selectVertices', 'selectEdges', 'selectAll', 'selectNone', '-', 'lockUnlock']);
 		})));
+
+		var action = editorUi.actions.addAction('comments', mxUtils.bind(this, function()
+		{
+			if (this.commentsWindow == null)
+			{
+				// LATER: Check outline window for initial placement
+				this.commentsWindow = new CommentsWindow(editorUi, document.body.offsetWidth - 380, 120, 300, 350);
+				//TODO Are these events needed?
+				this.commentsWindow.window.addListener('show', function()
+				{
+					editorUi.fireEvent(new mxEventObject('comments'));
+				});
+				this.commentsWindow.window.addListener('hide', function()
+				{
+					editorUi.fireEvent(new mxEventObject('comments'));
+				});
+				this.commentsWindow.window.setVisible(true);
+				editorUi.fireEvent(new mxEventObject('comments'));
+			}
+			else
+			{
+				this.commentsWindow.window.setVisible(!this.commentsWindow.window.isVisible());
+				this.commentsWindow.refreshCommentsTime();
+			}
+		}));
+		action.setToggleAction(true);
+		action.setSelectedCallback(mxUtils.bind(this, function() { return this.commentsWindow != null && this.commentsWindow.window.isVisible(); }));
+
+		// Destroys comments window to force update or disable if not supported
+		editorUi.editor.addListener('fileLoaded', mxUtils.bind(this, function()
+		{
+			if (this.commentsWindow != null)
+			{
+				this.commentsWindow.destroy();
+				this.commentsWindow = null;
+			}
+		}));
 		
+		// Extends toolbar dropdown to add comments
+		var viewPanelsMenu = this.get('viewPanels');
+		var viewPanelsFunct = viewPanelsMenu.funct;
+		
+		viewPanelsMenu.funct = function(menu, parent)
+		{
+			viewPanelsFunct.apply(this, arguments);
+			
+			if (editorUi.commentsSupported())
+			{
+				editorUi.menus.addMenuItems(menu, ['comments'], parent);
+			}
+		};
+
 		// Overrides view menu to add search and scratchpad
 		this.put('view', new Menu(mxUtils.bind(this, function(menu, parent)
 		{
 			this.addMenuItems(menu, ((this.editorUi.format != null) ? ['formatPanel'] : []).
-				concat(['outline', 'layers', '-']));
+				concat(['outline', 'layers']).concat((editorUi.commentsSupported()) ?
+				['comments', '-'] : ['-']));
+			
 			this.addMenuItems(menu, ['-', 'search'], parent);
 			
 			if (isLocalStorage || mxClient.IS_CHROMEAPP)
 			{
 				var item = this.addMenuItem(menu, 'scratchpad', parent);
 				
-				if (!editorUi.isOffline() || mxClient.IS_CHROMEAPP)
+				if (!editorUi.isOffline() || mxClient.IS_CHROMEAPP || EditorUi.isElectronApp)
 				{
 					this.addLinkToItem(item, 'https://desk.draw.io/support/solutions/articles/16000042367');
 				}
@@ -2781,7 +2928,11 @@
 			if (typeof(MathJax) !== 'undefined')
 			{
 				var item = this.addMenuItem(menu, 'mathematicalTypesetting', parent);
-				this.addLinkToItem(item, 'https://desk.draw.io/support/solutions/articles/16000032875');
+				
+				if (!editorUi.isOffline() || mxClient.IS_CHROMEAPP || EditorUi.isElectronApp)
+				{
+					this.addLinkToItem(item, 'https://desk.draw.io/support/solutions/articles/16000032875');
+				}
 			}
 			
 			if (urlParams['embed'] != '1')
@@ -2876,6 +3027,11 @@
 					this.addSubmenu('openLibraryFrom', menu, parent);
 				}
 				
+				if (editorUi.isRevisionHistorySupported())
+				{
+					this.addMenuItems(menu, ['-', 'revisionHistory'], parent);
+				}
+				
 				this.addMenuItems(menu, ['-', 'pageSetup', 'print', '-', 'rename', 'save'], parent);
 				
 				if (urlParams['saveAndExit'] == '1')
@@ -2900,7 +3056,7 @@
 					
 					var item = this.addMenuItem(menu, 'synchronize', parent);
 					
-					if (!editorUi.isOffline() || mxClient.IS_CHROMEAPP)
+					if (!editorUi.isOffline() || mxClient.IS_CHROMEAPP || EditorUi.isElectronApp)
 					{
 						this.addLinkToItem(item, 'https://desk.draw.io/support/solutions/articles/16000087947');
 					}
@@ -2931,7 +3087,7 @@
 						menu.addSeparator(parent);
 						var item = this.addMenuItem(menu, 'synchronize', parent);
 						
-						if (!editorUi.isOffline() || mxClient.IS_CHROMEAPP)
+						if (!editorUi.isOffline() || mxClient.IS_CHROMEAPP || EditorUi.isElectronApp)
 						{
 							this.addLinkToItem(item, 'https://desk.draw.io/support/solutions/articles/16000087947');
 						}
@@ -2969,7 +3125,7 @@
 				this.addSubmenu('newLibrary', menu, parent);
 				this.addSubmenu('openLibraryFrom', menu, parent);
 				
-				if (file != null && file.isRevisionHistorySupported())
+				if (editorUi.isRevisionHistorySupported())
 				{
 					this.addMenuItems(menu, ['-', 'revisionHistory'], parent);
 				}

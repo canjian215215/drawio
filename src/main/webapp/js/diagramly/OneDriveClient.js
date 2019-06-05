@@ -50,7 +50,7 @@ OneDriveClient.prototype.endpointHint = OneDriveClient.prototype.defEndpointHint
 /**
  * Executes the first step for connecting to Google Drive.
  */
-OneDriveClient.prototype.extension = '.html';
+OneDriveClient.prototype.extension = '.drawio';
 
 /**
  * Executes the first step for connecting to Google Drive.
@@ -61,6 +61,35 @@ OneDriveClient.prototype.baseUrl = 'https://graph.microsoft.com/v1.0';
  * Empty function used when no callback is needed
  */
 OneDriveClient.prototype.emptyFn = function(){};
+
+OneDriveClient.prototype.invalidFilenameRegExs = [
+	/[~"#%\*:<>\?\/\\{\|}]/,
+	/^\.lock$/i,
+	/^CON$/i,
+	/^PRN$/i,
+	/^AUX$/i,
+	/^NUL$/i,
+	/^COM\d$/i,
+	/^LPT\d$/i,
+	/^desktop\.ini$/i,
+	/_vti_/i
+];
+
+/**
+ * Check if the file/folder name is valid
+ */
+OneDriveClient.prototype.isValidFilename = function(filename)
+{
+	if (filename == null || filename === '') return false;
+	
+	for (var i = 0; i < this.invalidFilenameRegExs.length; i++)
+	{
+		if (this.invalidFilenameRegExs[i].test(filename)) return false;
+	}
+	
+	return true;
+};
+
 
 /**
  * Checks if the client is authorized and calls the next step.
@@ -375,7 +404,7 @@ OneDriveClient.prototype.executeRequest = function(url, success, error)
 					success(req);
 				}
 				// 400 is returns if wrong user for this file
-				else if (req.getStatus() === 401 || req.getStatus() === 400)
+				else if (!failOnAuth && (req.getStatus() === 401 || req.getStatus() === 400))
 				{
 					//Authorize again using the refresh token
 					this.authenticate(function()
@@ -491,47 +520,95 @@ OneDriveClient.prototype.getFile = function(id, success, error, denyConvert, asL
 				
 				this.ui.loadUrl(meta['@microsoft.graph.downloadUrl'], mxUtils.bind(this, function(data)
 				{
-					window.clearTimeout(timeoutThread);
-		    	
-			    	if (acceptResponse)
-			    	{
-						var index = (binary) ? data.lastIndexOf(',') : -1;
-						var file = null;
-
-						if (index > 0)
-						{
-							var xml = this.ui.extractGraphModelFromPng(data.substring(index + 1));
-							
-							if (xml != null && xml.length > 0)
+					try
+					{
+						window.clearTimeout(timeoutThread);
+			    	
+				    	if (acceptResponse)
+				    	{
+							var index = (binary) ? data.lastIndexOf(',') : -1;
+							var file = null;
+	
+							if (index > 0)
 							{
-								data = xml;
+								var xml = this.ui.extractGraphModelFromPng(data.substring(index + 1));
+								
+								if (xml != null && xml.length > 0)
+								{
+									data = xml;
+								}
+								else
+								{
+									// Imports as PNG image
+									file = new LocalFile(this.ui, data, meta.name, true);
+								}
+							}
+							// Checks for base64 encoded mxfile
+							else if (data.substring(0, 32) == 'data:image/png;base64,PG14ZmlsZS')
+							{
+								var temp = data.substring(22);
+								data = (window.atob && !mxClient.IS_SF) ? atob(temp) : Base64.decode(temp);
+							}
+							
+							if (Graph.fileSupport && new XMLHttpRequest().upload && this.ui.isRemoteFileFormat(data, meta['@microsoft.graph.downloadUrl']))
+							{
+								this.ui.parseFile(new Blob([data], {type: 'application/octet-stream'}), mxUtils.bind(this, function(xhr)
+								{
+									try
+									{
+										if (xhr.readyState == 4)
+										{
+											if (xhr.status >= 200 && xhr.status <= 299)
+											{
+												success(new LocalFile(this.ui, xhr.responseText, meta.name + this.extension, true));
+											}
+											else if (error != null)
+											{
+												error({message: mxResources.get('errorLoadingFile')});
+											}
+										}
+									}
+									catch (e)
+									{
+										if (error != null)
+										{
+											error(e);
+										}
+										else
+										{
+											throw e;
+										}
+									}
+								}), meta.name);
 							}
 							else
 							{
-								// Imports as PNG image
-								file = new LocalFile(this.ui, data, meta.name, true);
+								if (file != null)
+								{
+									success(file);
+								}
+								else if (asLibrary)
+								{
+									success(new OneDriveLibrary(this.ui, data, meta));
+								}
+								else
+								{
+									success(new OneDriveFile(this.ui, data, meta));
+								}
 							}
-						}
-						// Checks for base64 encoded mxfile
-						else if (data.substring(0, 32) == 'data:image/png;base64,PG14ZmlsZS')
+				    	}
+					}
+					catch (e)
+					{
+						if (error != null)
 						{
-							var temp = data.substring(22);
-							data = (window.atob && !mxClient.IS_SF) ? atob(temp) : Base64.decode(temp);
-						}
-						
-						if (file != null)
-						{
-							success(file);
-						}
-						else if (asLibrary)
-						{
-							success(new OneDriveLibrary(this.ui, data, meta));
+							error(e);
 						}
 						else
 						{
-							success(new OneDriveFile(this.ui, data, meta));
+							throw e;
 						}
-			    	}
+					}
     			}), mxUtils.bind(this, function(req)
 				{
 					window.clearTimeout(timeoutThread);
@@ -561,6 +638,13 @@ OneDriveClient.prototype.renameFile = function(file, filename, success, error)
 {
 	if (file != null && filename != null)
 	{
+		if (!this.isValidFilename(filename))
+		{
+			error({message: this.invalidFilenameRegExs[0].test(filename) ?
+					mxResources.get('oneDriveCharsNotAllowed') : mxResources.get('oneDriveInvalidDeviceName')});
+			return;
+		}
+		
 		// TODO: How to force overwrite file with same name?
 		this.checkExists(file.getParentId(), filename, false, mxUtils.bind(this, function(checked)
 		{
@@ -617,6 +701,13 @@ OneDriveClient.prototype.insertLibrary = function(filename, data, success, error
  */
 OneDriveClient.prototype.insertFile = function(filename, data, success, error, asLibrary, folderId)
 {
+	if (!this.isValidFilename(filename))
+	{
+		error({message: this.invalidFilenameRegExs[0].test(filename) ?
+				mxResources.get('oneDriveCharsNotAllowed') : mxResources.get('oneDriveInvalidDeviceName')});
+		return;
+	}
+
 	asLibrary = (asLibrary != null) ? asLibrary : false;
 	
 	this.checkExists(folderId, filename, true, mxUtils.bind(this, function(checked)
@@ -630,7 +721,7 @@ OneDriveClient.prototype.insertFile = function(filename, data, success, error, a
 				folder = this.getItemURL(folderId, true);
 			}
 			
-			var url = this.baseUrl + folder + '/children/' + filename + '/content';
+			var url = this.baseUrl + folder + '/children/' + encodeURIComponent(filename) + '/content';
 			
 			this.writeFile(url, data, 'PUT', null, mxUtils.bind(this, function(meta)
 			{
@@ -666,7 +757,7 @@ OneDriveClient.prototype.checkExists = function(parentId, filename, askReplace, 
 		folder = this.getItemURL(parentId, true);
 	}
 	
-	this.executeRequest(this.baseUrl + folder + '/children/' + filename, mxUtils.bind(this, function(req)
+	this.executeRequest(this.baseUrl + folder + '/children/' + encodeURIComponent(filename), mxUtils.bind(this, function(req)
 	{
 		if (req.getStatus() == 404)
 		{
@@ -787,7 +878,7 @@ OneDriveClient.prototype.writeFile = function(url, data, method, contentType, su
 			    		
 						success(JSON.parse(req.getText()));
 					}
-					else if (req.getStatus() === 401)
+					else if (!failOnAuth && req.getStatus() === 401)
 					{
 						this.authenticate(function()
 						{

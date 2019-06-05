@@ -85,9 +85,30 @@ DrawioFile.prototype.maxAutosaveDelay = 30000;
 DrawioFile.prototype.autosaveThread = null;
 
 /**
- * Stores the timestamp for hte last autosave.
+ * Stores the time stamp for the last autosave.
  */
 DrawioFile.prototype.lastAutosave = null;
+
+/**
+ * Stores the time stamp for the last autosave.
+ */
+DrawioFile.prototype.lastSaved = null;
+
+/**
+ * Stores the time stamp for the last autosave.
+ */
+DrawioFile.prototype.lastWarned = null;
+
+/**
+ * Interval to show dialog for unsaved data with autosave.
+ * Default is 600000 (10 minutes).
+ */
+DrawioFile.prototype.warnInterval = 600000;
+
+/**
+ * Stores the time stamp when the file was opened.
+ */
+DrawioFile.prototype.opened = null;
 
 /**
  * Stores the modified state.
@@ -120,9 +141,10 @@ DrawioFile.prototype.changeListenerEnabled = true;
 DrawioFile.prototype.lastAutosaveRevision = null;
 
 /**
- * Sets the delay for autosave in milliseconds. Default is 1000.
+ * Sets the delay between revisions when using autosave. Default is 300000
+ * ie 5 mins. Set this to 0 to create a revision on every autosave.
  */
-DrawioFile.prototype.maxAutosaveRevisionDelay = 1800000;
+DrawioFile.prototype.maxAutosaveRevisionDelay = 300000;
 
 /**
  * Specifies if notify events should be ignored.
@@ -413,7 +435,7 @@ DrawioFile.prototype.compressReportData = function(data, limit, max)
 	}
 	else if (data != null && data.length > limit)
 	{
-		data = this.ui.editor.graph.compress(data) + '\n';
+		data = Graph.compress(data) + '\n';
 	}
 
 	return data;
@@ -460,12 +482,9 @@ DrawioFile.prototype.checksumError = function(error, patches, details, etag, fun
 					this.ui.getPagesForNode(
 					mxUtils.parseXml(file.data).documentElement)), 25000) : 'n/a';
 				
-				this.sendErrorReport(
-					'Checksum Error in ' + functionName,
-					((details != null) ? (details) : '') +
-					'\n\nPatches:\n' + json +
-					((remote != null) ? ('\n\nRemote:\n' + remote) : ''),
-					null, 70000);
+				this.sendErrorReport('Checksum Error in ' + functionName + ' ' + this.getHash(),
+					((details != null) ? (details) : '') +  '\n\nPatches:\n' + json +
+					((remote != null) ? ('\n\nRemote:\n' + remote) : ''), null, 70000);
 			});
 	
 			if (etag == null)
@@ -492,8 +511,21 @@ DrawioFile.prototype.checksumError = function(error, patches, details, etag, fun
 			var user = this.getCurrentUser();
 			var uid = (user != null) ? user.id : 'unknown';
 			
-			EditorUi.logError('Checksum Error in ' + functionName, null,
-				this.getMode() + '.' + this.getId(), uid);
+			EditorUi.logError('Checksum Error in ' + functionName + ' ' + this.getId(),
+				null, this.getMode() + '.' + this.getId(), uid + '.' +
+				((this.sync != null) ? this.sync.clientId : 'nosync'));
+			
+			// Logs checksum error for file
+			try
+			{
+				EditorUi.logEvent({category: 'CHECKSUM-ERROR-SYNC-FILE-' + this.getHash(),
+					action: functionName, label:  uid + '.' +
+					((this.sync != null) ? this.sync.clientId : 'nosync')});
+			}
+			catch (e)
+			{
+				// ignore
+			}
 		}
 	}
 	catch (e)
@@ -733,7 +765,6 @@ DrawioFile.prototype.patch = function(patches, resolver)
 				}
 				else
 				{
-					
 					graph.view.validate();
 				}
 				
@@ -750,32 +781,51 @@ DrawioFile.prototype.patch = function(patches, resolver)
  */
 DrawioFile.prototype.save = function(revision, success, error, unloading, overwrite, manual)
 {
-	if (!this.isEditable())
+	try
 	{
-		if (error != null)
+		if (!this.isEditable())
 		{
-			error({message: mxResources.get('readOnly')});
+			if (error != null)
+			{
+				error({message: mxResources.get('readOnly')});
+			}
+			else
+			{
+				throw new Error(mxResources.get('readOnly'));
+			}
+		}
+		else if (!overwrite && this.invalidChecksum)
+		{
+			if (error != null)
+			{
+				error({message: mxResources.get('checksum')});
+			}
+			else
+			{
+				throw new Error(mxResources.get('checksum'));
+			}
 		}
 		else
 		{
-			throw new Error(mxResources.get('readOnly'));
+			this.updateFileData();
+			this.clearAutosave();
+			
+			if (success != null)
+			{
+				success();
+			}
 		}
 	}
-	else if (!overwrite && this.invalidChecksum)
+	catch (e)
 	{
 		if (error != null)
 		{
-			error({message: mxResources.get('checksum')});
+			error(e);
 		}
 		else
 		{
-			throw new Error(mxResources.get('checksum'));
+			throw e;
 		}
-	}
-	else
-	{
-		this.updateFileData();
-		this.clearAutosave();
 	}
 };
 
@@ -1035,6 +1085,14 @@ DrawioFile.prototype.loadPatchDescriptor = function(success, error)
 };
 
 /**
+ * Adds the listener for automatically saving the diagram for local changes.
+ */
+DrawioFile.prototype.patchDescriptor = function(desc, patch)
+{
+	this.setDescriptorEtag(desc, this.getDescriptorEtag(patch));
+};
+
+/**
  * Creates a starts the synchronization.
  */
 DrawioFile.prototype.startSync = function()
@@ -1066,7 +1124,7 @@ DrawioFile.prototype.isConflict = function()
 DrawioFile.prototype.getChannelId = function()
 {
 	// Slash, space and plus replaced with underscore
-	return this.ui.editor.graph.compress(this.getHash()).replace(/[\/ +]/g, '_');
+	return Graph.compress(this.getHash()).replace(/[\/ +]/g, '_');
 };
 
 /**
@@ -1183,6 +1241,8 @@ DrawioFile.prototype.installListeners = function()
 		this.ui.addListener('gridEnabledChanged', this.changeListener);
 		this.ui.addListener('guidesEnabledChanged', this.changeListener);
 		this.ui.addListener('pageViewChanged', this.changeListener);
+		this.ui.addListener('connectionPointsChanged', this.changeListener);
+		this.ui.addListener('connectionArrowsChanged', this.changeListener);
 	}
 };
 
@@ -1242,6 +1302,17 @@ DrawioFile.prototype.addUnsavedStatus = function(err)
 	//			}
 	//		}
 			var msg = this.getErrorMessage(err);
+
+			if (msg == null && this.lastSaved != null)
+			{
+				var str = this.ui.timeSince(new Date(this.lastSaved));
+				
+				// Only show if more than a minute ago
+				if (str != null)
+				{
+					msg = mxResources.get('lastSaved', [str]);
+				}
+			}
 			
 			if (msg != null && msg.length > 60)
 			{
@@ -1541,6 +1612,44 @@ DrawioFile.prototype.handleFileError = function(err, manual)
 					mxUtils.htmlEntities(mxResources.get('error')) +
 					((msg != null) ? ' (' + mxUtils.htmlEntities(msg) + ')' : '') + '</div>');
 			}
+			else if (this.isModified() && !manual && this.isAutosave())
+			{
+				if (this.lastWarned == null)
+				{
+					this.lastWarned = Date.now();
+				}
+				else if (Date.now() - this.lastWarned > this.warnInterval)
+				{
+					var msg = '';
+					
+					if (this.lastSaved != null)
+					{
+						var str = this.ui.timeSince(new Date(this.lastSaved));
+					
+						// Only show if more than a minute ago
+						if (str != null)
+						{
+							msg = mxResources.get('lastSaved', [str]);
+						}
+					}
+					
+					this.ui.showError(mxResources.get('unsavedChanges'), msg, mxResources.get('ignore'),
+						mxUtils.bind(this, function()
+						{
+							this.lastWarned = Date.now();
+							this.ui.hideDialog();
+							EditorUi.logEvent({category: 'IGNORE-WARN-SAVE-FILE-' + this.getHash() +
+								'-size-' + this.getSize(), action: 'ignore'});
+						}), null, mxResources.get('save'), mxUtils.bind(this, function()
+						{
+							this.lastWarned = Date.now();
+							this.ui.actions.get((this.ui.mode == null || !this.isEditable()) ?
+								'saveAs' : 'save').funct();
+							EditorUi.logEvent({category: 'SAVE-WARN-SAVE-FILE-' + this.getHash() +
+								'-size-' + this.getSize(), action: 'save'});
+						}), null, null, 360, 120);
+				}
+			}
 		}
 	}
 };
@@ -1653,6 +1762,8 @@ DrawioFile.prototype.fileChanged = function()
  */
 DrawioFile.prototype.fileSaved = function(savedData, lastDesc, success, error)
 {
+	this.lastSaved = new Date();
+	
 	try
 	{
 		this.stats.saved++;
@@ -1890,28 +2001,28 @@ DrawioFile.prototype.destroy = function()
 {
 	this.stats.destroyed++;
 	
-	try
-	{
-		if (!this.ui.isOffline() && this.reportEnabled &&
-			(DrawioFile.SYNC == 'auto' ||
-			DrawioFile.SYNC == 'manual'))
-		{
-			var user = this.getCurrentUser();
-			var uid = (user != null) ? user.id : 'unknown';
-		
-			EditorUi.logEvent({category: 'RT-END-' + DrawioFile.SYNC,
-				action: 'file-' + this.getId() +
-				'-mode-' + this.getMode() +
-				'-size-' + this.getSize() +
-				'-user-' + uid +
-				((this.sync != null) ? ('-client-' + this.sync.clientId ) : ''),
-				label: this.stats});
-		}
-	}
-	catch (e)
-	{
-		// ignore
-	}
+//	try
+//	{
+//		if (!this.ui.isOffline() && this.reportEnabled &&
+//			(DrawioFile.SYNC == 'auto' ||
+//			DrawioFile.SYNC == 'manual'))
+//		{
+//			var user = this.getCurrentUser();
+//			var uid = (user != null) ? user.id : 'unknown';
+//		
+//			EditorUi.logEvent({category: DrawioFile.SYNC + '-DESTROY-FILE-' + DrawioFile.SYNC,
+//				action: 'file-' + this.getId() +
+//				'-mode-' + this.getMode() +
+//				'-size-' + this.getSize() +
+//				'-user-' + uid +
+//				((this.sync != null) ? ('-client-' + this.sync.clientId ) : ''),
+//				label: this.stats});
+//		}
+//	}
+//	catch (e)
+//	{
+//		// ignore
+//	}
 
 	this.clearAutosave();
 	this.removeListeners();
@@ -1921,4 +2032,68 @@ DrawioFile.prototype.destroy = function()
 		this.sync.destroy();
 		this.sync = null;
 	}
+};
+
+/**
+ * Are comments supported
+ */
+DrawioFile.prototype.commentsSupported = function()
+{
+	return false; //The default is false and files that support it must explicitly state that
+};
+
+/**
+ * Show refresh button?
+ */
+DrawioFile.prototype.commentsRefreshNeeded = function()
+{
+	return true;
+};
+
+/**
+ * Show save button?
+ */
+DrawioFile.prototype.commentsSaveNeeded = function()
+{
+	return false;
+};
+
+/**
+ * Get comments of the file
+ */
+DrawioFile.prototype.getComments = function(success, error)
+{
+	success([]); //placeholder
+};
+
+/**
+ * Add a comment to the file
+ */
+DrawioFile.prototype.addComment = function(comment, success, error)
+{
+	success(Date.now()); //placeholder
+};
+
+/**
+ * Can add a reply to a reply
+ */
+DrawioFile.prototype.canReplyToReplies = function()
+{
+	return true;
+};
+
+/**
+ * Can add comments (The permission to comment to this file)
+ */
+DrawioFile.prototype.canComment = function()
+{
+	return true;
+};
+
+/**
+ * Get a new comment object
+ */
+DrawioFile.prototype.newComment = function(content, user)
+{
+	return new DrawioComment(this, null, content, Date.now(), Date.now(), false, user);
 };

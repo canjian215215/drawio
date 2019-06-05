@@ -1,5 +1,6 @@
 window.OPEN_URL = 'https://www.draw.io/open';
 window.TEMPLATE_PATH = 'templates';
+window.DRAW_MATH_URL = window.mxIsElectron5? 'math' : 'https://www.draw.io/math';
 FeedbackDialog.feedbackUrl = 'https://log.draw.io/email';
 
 (function()
@@ -716,41 +717,49 @@ FeedbackDialog.feedbackUrl = 'https://log.draw.io/email';
 					
 					var writeFile = mxUtils.bind(this, function()
 					{
-						fs.writeFile(this.fileObject.path, data, enc || this.fileObject.encoding,
-							mxUtils.bind(this, function (e)
-					    {
-			        		if (e)
-			        		{
-			        			errorWrapper();
-			        		}
-			        		else
-			        		{
-								fs.stat(this.fileObject.path, mxUtils.bind(this, function(e2, stat2)
-								{
-									if (e2)
-					        		{
-					        			errorWrapper();
-					        		}
-									else
+						if (data == null || data.length == 0)
+						{
+							this.ui.handleError({message: mxResources.get('errorSavingFile')});
+							errorWrapper();
+						}
+						else
+						{
+							fs.writeFile(this.fileObject.path, data, enc || this.fileObject.encoding,
+								mxUtils.bind(this, function (e)
+						    {
+				        		if (e)
+				        		{
+				        			errorWrapper();
+				        		}
+				        		else
+				        		{
+									fs.stat(this.fileObject.path, mxUtils.bind(this, function(e2, stat2)
 									{
-										this.savingFile = false;
-										this.isModified = prevModified;
-										var lastDesc = this.stat;
-										this.stat = stat2;
-										
-										this.fileSaved(savedData, lastDesc, mxUtils.bind(this, function()
+										if (e2)
+						        		{
+						        			errorWrapper();
+						        		}
+										else
 										{
-											this.contentChanged();
+											this.savingFile = false;
+											this.isModified = prevModified;
+											var lastDesc = this.stat;
+											this.stat = stat2;
 											
-											if (success != null)
+											this.fileSaved(savedData, lastDesc, mxUtils.bind(this, function()
 											{
-												success();
-											}
-										}), error);
-									}
-								}));
-			        		}
-			        	}));
+												this.contentChanged();
+												
+												if (success != null)
+												{
+													success();
+												}
+											}), error);
+										}
+									}));
+				        		}
+				        	}));
+						}
 					});
 					
 					if (overwrite)
@@ -830,7 +839,7 @@ FeedbackDialog.feedbackUrl = 'https://log.draw.io/email';
 		if (filename.length > 0 && (!/(\.xml)$/i.test(filename) && !/(\.html)$/i.test(filename) &&
 			!/(\.svg)$/i.test(filename) && !/(\.png)$/i.test(filename) && !/(\.drawio)$/i.test(filename)))
 		{
-			filename += '.xml';
+			filename += '.drawio';
 		}
 		
 		var path = dialog.showSaveDialog({defaultPath: filename});
@@ -1005,6 +1014,153 @@ FeedbackDialog.feedbackUrl = 'https://log.draw.io/email';
 			});
 		}
 	};
+
+	function mxElectronRequest(reqType, reqObj)
+	{
+		this.reqType = reqType;
+		this.reqObj = reqObj;
+	};
+
+	//Extends mxXmlRequest
+	mxUtils.extend(mxElectronRequest, mxXmlRequest);
+	
+	mxElectronRequest.prototype.send = function(callback, error)
+	{
+		const ipcRenderer = require('electron').ipcRenderer;
+		ipcRenderer.send(this.reqType, this.reqObj);
+		
+		ipcRenderer.once(this.reqType + '-success', (event, data) => 
+		{
+			this.response = data;
+			callback();
+			ipcRenderer.send(this.reqType + '-finalize');
+		})
+
+		ipcRenderer.once(this.reqType + '-error', (event, err) => 
+		{
+			this.hasError = true;
+			error(err);
+			ipcRenderer.send(this.reqType + '-finalize');
+		})
+	};
+	
+	mxElectronRequest.prototype.getStatus = function()
+	{
+		return this.hasError? 500 : 200; 
+	}
+	
+	mxElectronRequest.prototype.getText = function()
+	{
+		return this.response;
+	}
+	
+	if (mxIsElectron5)
+	{
+		//Direct export to pdf
+		EditorUi.prototype.createDownloadRequest = function(filename, format, ignoreSelection, base64, transparent, currentPage)
+		{
+			var bounds = this.editor.graph.getGraphBounds();
+			
+			// Exports only current page for images that does not contain file data, but for
+			// the other formats with XML included or pdf with all pages, we need to send the complete data and use
+			// the from/to URL parameters to specify the page to be exported.
+			var data = this.getFileData(true, null, null, null, ignoreSelection, currentPage == false? false : format != 'xmlpng');
+			var range = null;
+			var allPages = null;
+			
+			if (bounds.width * bounds.height > MAX_AREA || data.length > MAX_REQUEST_SIZE)
+			{
+				throw {message: mxResources.get('drawingTooLarge')};
+			}
+			
+			var embed = '0';
+			
+			if (format == 'pdf' && currentPage == false)
+			{
+				allPages = '1';
+			}
+			
+			if (format == 'xmlpng')
+	       	{
+	       		embed = '1';
+	       		format = 'png';
+	       		
+	       		// Finds the current page number
+	       		if (this.pages != null && this.currentPage != null)
+	       		{
+	       			for (var i = 0; i < this.pages.length; i++)
+	       			{
+	       				if (this.pages[i] == this.currentPage)
+	       				{
+	       					range = i;
+	       					break;
+	       				}
+	       			}
+	       		}
+	       	}
+			
+			var bg = this.editor.graph.background;
+			
+			if (format == 'png' && transparent)
+			{
+				bg = mxConstants.NONE;
+			}
+			
+			return new mxElectronRequest('export', {
+				format: format,
+				xml: data,
+				from: range,
+				bg: (bg != null) ? bg : mxConstants.NONE,
+				filename: (filename != null) ? filename : null,
+				allPages: allPages,
+				base64: base64,
+				embedXml: embed
+			});
+		};
+		
+		//Export Dialog Pdf case
+		var origExportFile = ExportDialog.exportFile;
+		
+		ExportDialog.exportFile = function(editorUi, name, format, bg, s, b)
+		{
+			var graph = editorUi.editor.graph;
+			
+			if (format == 'xml' || format == 'svg')
+			{
+				return origExportFile.apply(this, arguments);
+			}
+			else
+			{
+				var data = editorUi.getFileData(true, null, null, null, null, true);
+	    		var bounds = graph.getGraphBounds();
+				var w = Math.floor(bounds.width * s / graph.view.scale);
+				var h = Math.floor(bounds.height * s / graph.view.scale);
+				
+				if (data.length <= MAX_REQUEST_SIZE && w * h < MAX_AREA)
+				{
+					editorUi.hideDialog();
+					editorUi.saveRequest(name, format,
+						function(newTitle, base64)
+						{
+							return new mxElectronRequest('export', {
+								format: format,
+								xml: data,
+								bg: (bg != null) ? bg : mxConstants.NONE,
+								filename: (newTitle != null) ? newTitle : null,
+								w: w,
+								h: h,
+								border: b,
+								base64: (base64 || '0')
+							}); 
+						});
+				}
+				else
+				{
+					mxUtils.alert(mxResources.get('drawingTooLarge'));
+				}
+			}
+		};
+	}
 	
 	EditorUi.prototype.saveData = function(filename, format, data, mimeType, base64Encoded)
 	{
@@ -1021,23 +1177,30 @@ FeedbackDialog.feedbackUrl = 'https://log.draw.io/email';
 	
 	        if (path != null)
 	        {
-				var fs = require('fs');
-				resume();
-				
-				var fileObject = new Object();
-				fileObject.path = path;
-				fileObject.name = path.replace(/^.*[\\\/]/, '');
-				fileObject.type = (base64Encoded) ? 'base64' : 'utf-8';
-				
-				fs.writeFile(fileObject.path, data, fileObject.type, mxUtils.bind(this, function (e)
-			    {
-					this.spinner.stop();
+	        	if (data == null || data.length == 0)
+				{
+					this.handleError({message: mxResources.get('errorSavingFile')});
+				}
+				else
+				{
+					var fs = require('fs');
+					resume();
 					
-					if (e)
-					{
-						this.handleError({message: mxResources.get('errorSavingFile')});
-					}
-	        	}));
+					var fileObject = new Object();
+					fileObject.path = path;
+					fileObject.name = path.replace(/^.*[\\\/]/, '');
+					fileObject.type = (base64Encoded) ? 'base64' : 'utf-8';
+					
+					fs.writeFile(fileObject.path, data, fileObject.type, mxUtils.bind(this, function (e)
+				    {
+						this.spinner.stop();
+						
+						if (e)
+						{
+							this.handleError({message: mxResources.get('errorSavingFile')});
+						}
+		        	}));
+				}
 			}
 		}), 0);
 	};

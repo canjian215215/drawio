@@ -83,7 +83,7 @@ Draw.loadPlugin(function(ui) {
 		
 		if (replayData != null)
 		{
-			var xmlDoc = mxUtils.parseXml(graph.decompress(replayData));
+			var xmlDoc = mxUtils.parseXml(Graph.decompress(replayData));
 			// LATER: Avoid duplicate parsing
 			ui.fileLoaded(new LocalFile(ui, mxUtils.getXml(xmlDoc.documentElement.firstChild.firstChild)));
 
@@ -130,7 +130,7 @@ Draw.loadPlugin(function(ui) {
 		
 		mxResources.parse('record=Record');
 		mxResources.parse('replay=Replay');
-	
+		
 	    // Adds actions
 	    var action = ui.actions.addAction('record...', function()
 	    {
@@ -140,9 +140,11 @@ Draw.loadPlugin(function(ui) {
 		    	var state = codec.document.createElement('state');
 		    	state.appendChild(node);
 		    	tape =[mxUtils.getXml(state)];
+		    	ui.editor.setStatus('Recording started');
 	    	}
 	    	else if (tape != null)
 	    	{
+	    		ui.editor.setStatus('Recording stopped');
 	    		var tmp = tape;
 	    		tape = null;
 
@@ -151,8 +153,8 @@ Draw.loadPlugin(function(ui) {
 					if (newValue != null)
 					{
 						var dlg = new EmbedDialog(ui, 'https://www.draw.io/?p=replay&lightbox=1&replay-delay=' +
-								parseFloat(newValue) + '&replay-data=' + graph.compress('<recording>' +
-								tmp.join('') + '</recording>'));
+							parseFloat(newValue) + '&replay-data=' + Graph.compress('<recording>' +
+							tmp.join('') + '</recording>'));
 						ui.showDialog(dlg.container, 440, 240, true, true);
 						dlg.init();
 					}
@@ -160,6 +162,8 @@ Draw.loadPlugin(function(ui) {
 				ui.showDialog(dlg.container, 300, 80, true, true);
 				dlg.init();
 	    	}
+	    	
+	    	action.label = (tape != null) ? 'Stop recording' : mxResources.get('record') + '...';
 	    });
 		
 	    ui.actions.addAction('replay...', function()
@@ -182,7 +186,7 @@ Draw.loadPlugin(function(ui) {
 						
 						if (newValue.charAt(0) != '<')
 						{
-							newValue = graph.decompress(newValue);
+							newValue = Graph.decompress(newValue);
 						}
 						
 						if (newValue.charAt(0) == '[')
